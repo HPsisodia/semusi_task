@@ -31,4 +31,7 @@ app.use("/", authRoute);
 app.use("/", dashboardRoute);
 
 const PORT = process.env.PORT || 3000;
-const DBURL = process.env.DBURL ////add mongo database URI here
+
+app.listen(PORT, () => {
+    console.log(`Application is running on port ${PORT}`);
+  });

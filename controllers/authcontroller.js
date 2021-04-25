@@ -1,7 +1,9 @@
 const { promisify } = require('util');
 require("dotenv").config();
+
 const shortid = require("shortid");
-const { pool } = require("./../database/pg");
+
+const { pool } = require("../database/pg");
 
 const ENV = 'development';
 const {
@@ -13,14 +15,15 @@ const {
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-const signToken = (email) =>{
-    return jwt.sign({password: email}, process.env.SECRET_KEY, {
+const signToken = (email, first_name, last_name, pic) =>{
+    return jwt.sign({email, first_name, last_name, pic}, process.env.SECRET_KEY, {
         expiresIn: "90d"
     });
 }
 
 const createSendToken = (user, res) =>{
-  const token = signToken(user[0].email);
+  const token = signToken(user.rows[0].email, user.rows[0].first_name, user.rows[0].last_name, user.rows[0].pic);
+
 
   const cookieOptions = {
     expires: new Date(Date.now() + 90*24*60*60*1000 ),
@@ -37,54 +40,55 @@ const createSendToken = (user, res) =>{
 
 exports.registration = async(req,res) => {
 
-    const { email, first_name, last_name, gender, password } = req.body;
+    const { email, first_name, last_name, gender, password, confirmpassword } = req.body;
+
     try {
-
-        const newUser = await registrationModel.create(req.body)
-
-        const isUserExist = await pool.query(
-            "Select email from admins WHERE email = '" +
-        email
-        );
-
+        if (password !== confirmpassword){
+          
+          return res.render("passwordNotMatch");
+        }
+        console.log("here");
+        const isUserExist = await pool.query("SELECT email from admins WHERE email = '" + email + "'" );
+        console.log("hhhh")
         if (isUserExist.rows.length !== 0) {
+          
             return res
-              .status(statusCode.bad)
-              .json(
-                returnErrorJsonResponse(
-                  statusCode.notfound,
-                  "fail",
-                  "User already registered under the email"
-                )
-              );
+              .status(statusCode.error)
+              .render('userExist');
           }
 
         const salt = await bcrypt.genSalt(13);
         const hashPassword = await bcrypt.hash(password, salt);  
-        const id = shortid.generate;
-        const pic = "";
-  
-        const createAdminQuery =
-        "INSERT INTO admins (id, first_name, last_name, gender, email, password, pic) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *";
+        const id = shortid.generate();
+        var pic;
+        if(gender == "Male"){
+          pic = "user-male.jpg";
+        }else{
+          pic = "user-female.jpg";
+        }
 
-        const newUser = await pool.query(createAdminQuery, [
+        const createAdminQuery =
+        "INSERT INTO admins (id, first_name, last_name, gender, password, email, pic) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *";
+
+        const createNewUser = await pool.query(createAdminQuery, [
             id,
             first_name,
             last_name,
             gender,
-            email,
-            password, 
-            pic
+            hashPassword,
+            email, 
+            pic,
           ]);
 
-        const token = signToken(newUser.email);
-        if(newUser){
-            res.set( {
-                'token': token
-            });
-            console.log(token);
-            res.redirect('/login')
-            //res.redirect('/login'); 
+        //const newUser = createNewUser[0];
+
+        //const token = signToken(newUser.email, newUser.first_name, newUser.last_name, newUser.pic);
+        if(createNewUser){
+            // res.set( {
+            //     'token': token
+            // });
+            // console.log(token);
+            res.redirect('/login') 
         }else{
             return res
             .status(statusCode.bad)
@@ -107,7 +111,7 @@ exports.registration = async(req,res) => {
           returnErrorJsonResponse(
             statusCode.bad,
             "fail",
-            "Something went wrong, Please try again",
+            "Something went wrong, Please try again 1",
             error
           )
         );        
@@ -118,14 +122,20 @@ exports.registration = async(req,res) => {
 exports.login = async (req,res) => {
     try {
         const {email, password} = req.body;
-        const user = await registrationModel.find({email: email}).select('+password');
 
-        if(user[0] === undefined || !(await bcrypt.compare(password, user[0].password))){
+        const user = await pool.query(
+          "Select * from admins WHERE email = '" +
+           email + "' "
+      );
+
+        if(user.rows[0] === undefined || !(await bcrypt.compare(password, user.rows[0].password))){
             return res.render("404login")           
         }
 
         ///send token
         createSendToken(user, res);
+
+
         // const token = signToken(user[0].email, user[0].role);
         // console.log(token);
 
@@ -174,7 +184,11 @@ exports.protect = async (req,res,next) => {
     const decoded = await promisify(jwt.verify)(token, process.env.SECRET_KEY);
 
     ///check if user exits
-    const freshUser = await registrationModel.find({email: decoded.email});
+    const freshUser = await pool.query(
+      "Select * from admins WHERE email = '" +
+      decoded.email + "' "
+  );
+
     if(!freshUser){
       return res
       .status(statusCode.unauthorized)
@@ -189,7 +203,7 @@ exports.protect = async (req,res,next) => {
     }
 
     ////Grant Access
-    req.user = freshUser[0];
+    req.user = freshUser.rows[0];
     next();
   }catch{
     return res
